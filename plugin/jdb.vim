@@ -19,8 +19,8 @@ endfunction
 function! s:GetBreakPointHit(str)
     let ff = matchlist(a:str, '\(Step completed\|Breakpoint hit\): "thread=\(\S\+\)", \(\S\+\)\.\(\S\+\)(), line=\(\d\+\) bci=\(\d\+\)')
     if len(ff) > 0
-        if has_key(t:mapClassFile, ff[3])
-            let t:bpFile = t:mapClassFile[ff[3]]
+        if has_key(g:mapClassFile, ff[3])
+            let t:bpFile = g:mapClassFile[ff[3]]
         else
             let t:bpFile = substitute(ff[3], '\.', '/', 'g').".java"
         endif
@@ -34,7 +34,7 @@ function! s:HitBreakPoint(str)
     if !exists("t:bpFile")
         return 0
     endif
-    for dir in t:sourcepaths
+    for dir in g:sourcepaths
         if filereadable(dir.t:bpFile)
             let fl = readfile(dir.t:bpFile)
             if len(fl) > t:bpLine && stridx(a:str, fl[t:bpLine - 1]) > 0
@@ -74,8 +74,8 @@ function! JdbOutHandler(channel, msg)
     endif
 endfunction
 
-let t:sourcepaths = [""]
-let t:mapClassFile = {}
+let g:sourcepaths = [""]
+let g:mapClassFile = {}
 function! s:GetClassNameFromFile(fn, ln)
     let lines = readfile(a:fn)
     let lpack = 0
@@ -91,6 +91,10 @@ function! s:GetClassNameFromFile(fn, ln)
         let lpack = lpack + 1
     endwhile
 
+    if len(packageName) == 0
+        let lpack = 0
+    endif
+
     let lclass = lpack
     let mainClassName = ""
     while mainClassName == "" && l:ln > lclass
@@ -105,26 +109,33 @@ function! s:GetClassNameFromFile(fn, ln)
         let mainClassName = packageName.".".mainClassName
     endif
     let pn = substitute(mainClassName, '\.', '/', "g").".java"
-    let t:mapClassFile[mainClassName] = a:fn
+    let g:mapClassFile[mainClassName] = a:fn
     let srcRoot = substitute(a:fn, pn, "", "")
-    if index(t:sourcepaths, srcRoot) == -1
-        call add(t:sourcepaths, srcRoot)
+    if index(g:sourcepaths, srcRoot) == -1
+        call add(g:sourcepaths, srcRoot)
     endif
 
     let lclass = a:ln
-    let className = ""
-    while className == "" && lpack < lclass
-        let ff = matchlist(lines[lclass],  '^\%(public\s\+\)\?\%(abstract\s\+\)\?class\s\+\(\w\+\)')
+    let className = []
+    while 1
+        let ff = matchlist(getline('.'),  '^\s*\%(public\s\+\)\?\%(abstract\s\+\)\?class\s\+\(\w\+\)')
         if len(ff) > 1
-            let className = ff[1]
+            call insert(className, ff[1])
         endif
-        let lclass = lclass - 1
+        normal [{
+        if line('.') < lclass
+            let lclass = line('.')
+        else
+            exec "normal ".a:ln."G"
+            break
+        endif
     endwhile
+    let className = join(className, '$')
 
     if len(packageName) > 1
         let className = packageName.".".className
     endif
-    let t:mapClassFile[className] = a:fn
+    let g:mapClassFile[className] = a:fn
     return className
 endfunction
 
@@ -140,7 +151,7 @@ function! StartJDB(port)
     let t:jdb_buf = "[JDB] ".a:port.">"
     call <SID>GetClassNameFromFile(expand("%:p"), line("."))
     let cw = bufwinnr('%')
-    let jdb_cmd = g:jdbExecutable.' -sourcepath '.join(t:sourcepaths, ":").' -attach '.a:port
+    let jdb_cmd = g:jdbExecutable.' -sourcepath '.join(g:sourcepaths, ":").' -attach '.a:port
     call FocusMyConsole("botri 10", t:jdb_buf)
     call append(".", jdb_cmd)
     execute cw."wincmd w"
@@ -157,7 +168,7 @@ function! s:PlaceBreakSigns()
             let fn = ff[1]
             let ln = ff[2]
             silent exec "sign place ".bno." name=breakpt line=".ln." file=".fn
-            call ch_sendraw(t:jdb_ch, "stop at ".<SID>GetClassNameFromFile(fn, ln - 1).":".ln."\n")
+            call ch_sendraw(t:jdb_ch, "stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln."\n")
         endif
     endfor
 endfunction
@@ -190,15 +201,15 @@ function! SendJDBCmd(cmd)
     endif
 endfunction
 
-if !exists('g:jdb_port')
-    let g:jdb_port = "6789"
+if !exists('g:jdbPort')
+    let g:jdbPort = "6789"
 endif
 
 function! Run()
     if IsAttached()
         call ch_sendraw(t:jdb_ch, "run\n")
     else
-        call StartJDB(g:jdb_port)
+        call StartJDB(g:jdbPort)
     endif
 endfunction
 
@@ -240,11 +251,11 @@ function! ToggleBreakPoint()
     let [bno, enabled] = GetBreakPointId(pos)
     if enabled
         silent exec "sign unplace ".bno." file=".fn
-        call SendJDBCmd("clear ".<SID>GetClassNameFromFile(fn, ln - 1).":".ln)
+        call SendJDBCmd("clear ".<SID>GetClassNameFromFile(fn, ln).":".ln)
         let t:breakpoints[pos] = [bno, 0]
     else
         silent exec "sign place ".bno." name=breakpt line=".ln." file=".fn
-        call SendJDBCmd("stop at ".<SID>GetClassNameFromFile(fn, ln - 1).":".ln)
+        call SendJDBCmd("stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln)
         let t:breakpoints[pos] = [bno, 1]
     endif
 endfunction
