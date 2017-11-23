@@ -2,6 +2,7 @@ import java.text.SimpleDateFormat;
 import java.util.TimeZone;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 public class Sample {
     public void doWork() {
@@ -29,6 +30,9 @@ public class Sample {
         System.out.println(lst1 == lst2); // return true in Groovy, false in Java.
         System.out.println(lst1.equals(lst2)); // return true in both Groovy and Java.
 
+        System.out.println(lst1);
+        Integer i = 34;
+        System.out.println(new ArrayList<Integer>(Arrays.asList(i)));
         Sample a = new Sample();
         a.doWork();
     }

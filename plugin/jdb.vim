@@ -1,3 +1,21 @@
+function! s:ParseStackFile()
+    let ff = matchlist(getline("."), '  \[\d\+\] \(\S\+\)\.\(\S\+\) (\(\S\+\).java:\(\d\+\))')
+    if len(ff) > 0
+        call <SID>SetCursor(substitute(ff[1], '\.\a\+$' , '.'.ff[3], ''), ff[4])
+        exe "normal \<C-W>w"
+        call <SID>HitBreakPoint("")
+        exe "normal \<C-W>w"
+        return 1
+    endif
+    return 0
+endfunction
+
+function! s:ConsoleOnEnter()
+    if !<SID>ParseStackFile()
+        call ch_sendraw(t:jdb_ch, getline(".")."\n")
+    endif
+endfunction
+
 function! FocusMyConsole(winOp, bufName)
     let bn = bufwinnr(a:bufName)
     if bn == -1
@@ -10,21 +28,25 @@ function! FocusMyConsole(winOp, bufName)
         setlocal ff=unix
         setlocal nolist
         map <buffer> q :q<CR>
-        map <buffer> <CR> :call ch_sendraw(t:jdb_ch, getline(".")."\n")<CR>
+        map <buffer> <CR> :call <SID>ConsoleOnEnter()<CR>
     else
         execute bn."wincmd w"
     endif
 endfunction
 
+function! s:SetCursor(className, lineNo)
+    if has_key(g:mapClassFile, a:className)
+        let t:bpFile = g:mapClassFile[a:className]
+    else
+        let t:bpFile = substitute(a:className, '\.', '/', 'g').".java"
+    endif
+    let t:bpLine = a:lineNo
+endfunction
+
 function! s:GetBreakPointHit(str)
     let ff = matchlist(a:str, '\(Step completed\|Breakpoint hit\): "thread=\(\S\+\)", \(\S\+\)\.\(\S\+\)(), line=\(\d\+\) bci=\(\d\+\)')
     if len(ff) > 0
-        if has_key(g:mapClassFile, ff[3])
-            let t:bpFile = g:mapClassFile[ff[3]]
-        else
-            let t:bpFile = substitute(ff[3], '\.', '/', 'g').".java"
-        endif
-        let t:bpLine = ff[5]
+        call <SID>SetCursor(ff[3], ff[5])
         return 1
     endif
     return 0
@@ -37,7 +59,7 @@ function! s:HitBreakPoint(str)
     for dir in g:sourcepaths
         if filereadable(dir.t:bpFile)
             let fl = readfile(dir.t:bpFile)
-            if len(fl) > t:bpLine && stridx(a:str, fl[t:bpLine - 1]) > 0
+            if len(fl) > t:bpLine && (a:str == "" || stridx(a:str, fl[t:bpLine - 1]) > 0)
                 let t:bpFile = dir.t:bpFile
                 silent exec "sign unplace ".t:cursign
                 silent exec "edit ".t:bpFile
@@ -52,7 +74,7 @@ function! s:HitBreakPoint(str)
 endfunction
 
 function! s:NothingSuspended(str)
-    if a:str == "> Nothing suspended."
+    if a:str == "> Nothing suspended." || a:str =~ '^\S\+ All threads resume.'
         silent exec "sign unplace ".t:cursign
         call <SID>PlaceBreakSigns()
         return 1
@@ -116,11 +138,11 @@ function! s:GetClassNameFromFile(fn, ln)
     endif
 
     let lclass = a:ln
-    let className = []
+    let classNameL = []
     while 1
         let ff = matchlist(getline('.'),  '^\s*\%(public\s\+\)\?\%(abstract\s\+\)\?class\s\+\(\w\+\)')
         if len(ff) > 1
-            call insert(className, ff[1])
+            call insert(classNameL, ff[1])
         endif
         normal [{
         if line('.') < lclass
@@ -130,7 +152,7 @@ function! s:GetClassNameFromFile(fn, ln)
             break
         endif
     endwhile
-    let className = join(className, '$')
+    let className = join(classNameL, '$')
 
     if len(packageName) > 1
         let className = packageName.".".className
@@ -143,8 +165,12 @@ if !exists('g:jdbExecutable')
     let g:jdbExecutable = 'jdb'
 endif
 
-let t:breakpoints = {}
-let t:nextBreakPointId = 10000
+function! s:InitJavaTab()
+    if !exists('t:breakpoints')
+        let t:breakpoints = {}
+        let t:nextBreakPointId = 10000
+    endif
+endfunction
 
 function! StartJDB(port)
     let t:cursign = 10000 - tabpagenr()
@@ -184,6 +210,7 @@ endfunction
 
 function! QuitJDB()
     if exists("t:jdb_ch")
+        call ch_sendraw(t:jdb_ch, "resume\n")
         call ch_sendraw(t:jdb_ch, "exit\n")
         call ch_close(t:jdb_ch)
         call OnQuitJDB()
@@ -202,12 +229,12 @@ function! SendJDBCmd(cmd)
 endfunction
 
 if !exists('g:jdbPort')
-    let g:jdbPort = "6789"
+    let g:jdbPort = "localhost:6789"
 endif
 
 function! Run()
     if IsAttached()
-        call ch_sendraw(t:jdb_ch, "run\n")
+        call ch_sendraw(t:jdb_ch, "resume\n")
     else
         call StartJDB(g:jdbPort)
     endif
@@ -226,6 +253,7 @@ function! StepUp()
 endfunction
 
 function! GetBreakPointId(pos)
+    call <SID>InitJavaTab()
     if has_key(t:breakpoints, a:pos)
         return t:breakpoints[a:pos]
     else
