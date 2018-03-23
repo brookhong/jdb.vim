@@ -11,24 +11,27 @@ function! SearchFileBackwards(fn)
         endif
         let pos = pos - 1
     endwhile
-    return pom
+    return strpart(fp, 0, pos + 1)
 endfunction
 
 function! BuildMavenProject()
+    let consoleName = "*quick build*"
+    call FocusMyConsole("botri 10", consoleName)
+    exe "normal \<C-W>w"
     let pom = SearchFileBackwards("pom.xml")
-    if pom != ""
-        exec '!mvn -f '.SearchFileBackwards("pom.xml").' compile'
+    if pom != "/"
+        call job_start('mvn -f '.SearchFileBackwards("pom.xml").'pom.xml compile', {"out_io": "buffer", "out_name": consoleName, "err_io": "buffer", "err_name": consoleName})
     else
-        call CompileAndRun()
+        let pom = SearchFileBackwards("build.xml")
+        if pom != "/"
+            call job_start(['sh', '-c', 'cd '.pom.' && brazil-build'], {"out_io": "buffer", "out_name": consoleName, "err_io": "buffer", "err_name": consoleName})
+        else
+            call job_start(['sh', '-c', 'javac '.expand('%').' && java -cp '.expand('%:h').' '.expand('%:r')], {"out_io": "buffer", "out_name": consoleName, "err_io": "buffer", "err_name": consoleName})
+        endif
     endif
 endfunction
 
 " autocmd BufWritePost *.java :call BuildMavenProject()
-
-function! CompileAndRun()
-    exec '!javac '.expand('%')
-    exec '!java -cp '.expand('%:h').' '.expand('%:r')
-endfunction
 
 function! RemoveUnusedJavaPackages()
     let lastLine = line('$')
