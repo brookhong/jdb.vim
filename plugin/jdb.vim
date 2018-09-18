@@ -120,9 +120,9 @@ function! s:GetClassNameFromFile(fn, ln)
     let lclass = lpack
     let mainClassName = ""
     while mainClassName == "" && l:ln > lclass
-        let ff = matchlist(lines[lclass],  '^\%(public\s\+\)\?\%(abstract\s\+\)\?class\s\+\(\w\+\)')
-        if len(ff) > 1
-            let mainClassName = ff[1]
+        let ff = matchlist(lines[lclass],  '^\%(public\s\+\)\?\%(abstract\s\+\)\?\(class\|interface\)\s\+\(\w\+\)')
+        if len(ff) > 2
+            let mainClassName = ff[2]
         endif
         let lclass = lclass + 1
     endwhile
@@ -140,9 +140,9 @@ function! s:GetClassNameFromFile(fn, ln)
     let lclass = a:ln
     let classNameL = []
     while 1
-        let ff = matchlist(getline('.'),  '^\s*\%(public\s\+\)\?\%(abstract\s\+\)\?class\s\+\(\w\+\)')
-        if len(ff) > 1
-            call insert(classNameL, ff[1])
+        let ff = matchlist(getline('.'),  '^\s*\%(public\s\+\)\?\%(final\s\+\)\?\%(abstract\s\+\)\?\(class\|interface\)\s\+\(\w\+\)')
+        if len(ff) > 2
+            call insert(classNameL, ff[2])
         endif
         normal [{
         if line('.') < lclass
