@@ -35,10 +35,11 @@ function! FocusMyConsole(winOp, bufName)
 endfunction
 
 function! s:SetCursor(className, lineNo)
-    if has_key(g:mapClassFile, a:className)
-        let t:bpFile = g:mapClassFile[a:className]
+    let l:mainClassName = substitute(a:className, '\$.*', '', '')
+    if has_key(g:mapClassFile, l:mainClassName)
+        let t:bpFile = g:mapClassFile[l:mainClassName]
     else
-        let t:bpFile = substitute(a:className, '\.', '/', 'g').".java"
+        let t:bpFile = substitute(l:mainClassName, '\.', '/', 'g').".java"
     endif
     let t:bpLine = a:lineNo
 endfunction
@@ -98,7 +99,12 @@ endfunction
 
 let g:sourcepaths = [""]
 let g:mapClassFile = {}
+let g:mapFileClass = {}
 function! s:GetClassNameFromFile(fn, ln)
+    if has_key(g:mapFileClass, a:fn.':'.a:ln)
+        return g:mapFileClass[a:fn.':'.a:ln]
+    endif
+
     let lines = readfile(a:fn)
     let lpack = 0
     let packageName = ""
@@ -157,7 +163,8 @@ function! s:GetClassNameFromFile(fn, ln)
     if len(packageName) > 1
         let className = packageName.".".className
     endif
-    let g:mapClassFile[className] = a:fn
+
+    let g:mapFileClass[a:fn.':'.a:ln] = className
     return className
 endfunction
 
