@@ -45,9 +45,9 @@ function! s:SetCursor(className, lineNo)
 endfunction
 
 function! s:GetBreakPointHit(str)
-    let ff = matchlist(a:str, '\(Step completed\|Breakpoint hit\): "thread=\(\S\+\)", \(\S\+\)\.\(\S\+\)(), line=\(\d\+\) bci=\(\d\+\)')
+    let ff = matchlist(a:str, '\(Step completed: \|Breakpoint hit: \|\)"thread=\([^"]\+\)", \(\S\+\)\.\(\S\+\)(), line=\([0-9,]\+\) bci=\(\d\+\)')
     if len(ff) > 0
-        call <SID>SetCursor(ff[3], ff[5])
+        call <SID>SetCursor(ff[3], substitute(ff[5], ",", '', 'g'))
         return 1
     endif
     return 0
@@ -61,12 +61,16 @@ function! s:HitBreakPoint(str)
         if filereadable(dir.t:bpFile)
             let fl = readfile(dir.t:bpFile)
             if len(fl) > t:bpLine && (a:str == "" || stridx(a:str, fl[t:bpLine - 1]) > 0)
+                if bufname('%') =~ '^\[JDB\]'
+                    exe "normal \<C-W>w"
+                endif
                 let t:bpFile = dir.t:bpFile
                 silent exec "sign unplace ".t:cursign
                 silent exec "edit ".t:bpFile
                 silent exec 'sign place '.t:cursign.' name=current line='.t:bpLine.' file='.t:bpFile
                 exec t:bpLine
                 redraw!
+                unlet t:bpFile
                 return 1
             endif
         end
@@ -92,6 +96,7 @@ function! JdbExitHandler(channel, msg)
 endfunction
 
 function! JdbOutHandler(channel, msg)
+    call writefile([a:msg], $HOME."/.jdb.vim.log", "a")
     if !<SID>GetBreakPointHit(a:msg) && !<SID>HitBreakPoint(a:msg) && !<SID>NothingSuspended(a:msg)
         echo a:msg
     endif
@@ -125,28 +130,19 @@ function! s:GetClassNameFromFile(fn, ln)
 
     let lclass = lpack
     let mainClassName = ""
+    let classPattern = '^\s*\%(public\s\+\)\?\%(final\s\+\)\?\%(abstract\s\+\)\?\(class\|interface\)\s\+\(\w\+\)'
     while mainClassName == "" && l:ln > lclass
-        let ff = matchlist(lines[lclass],  '^\%(public\s\+\)\?\%(abstract\s\+\)\?\(class\|interface\)\s\+\(\w\+\)')
+        let ff = matchlist(lines[lclass], classPattern)
         if len(ff) > 2
             let mainClassName = ff[2]
         endif
         let lclass = lclass + 1
     endwhile
 
-    if len(packageName) > 1
-        let mainClassName = packageName.".".mainClassName
-    endif
-    let pn = substitute(mainClassName, '\.', '/', "g").".java"
-    let g:mapClassFile[mainClassName] = a:fn
-    let srcRoot = substitute(a:fn, pn, "", "")
-    if index(g:sourcepaths, srcRoot) == -1
-        call add(g:sourcepaths, srcRoot)
-    endif
-
     let lclass = a:ln
     let classNameL = []
     while 1
-        let ff = matchlist(getline('.'),  '^\s*\%(public\s\+\)\?\%(final\s\+\)\?\%(abstract\s\+\)\?\(class\|interface\)\s\+\(\w\+\)')
+        let ff = matchlist(getline('.'), classPattern)
         if len(ff) > 2
             call insert(classNameL, ff[2])
         endif
@@ -158,10 +154,22 @@ function! s:GetClassNameFromFile(fn, ln)
             break
         endif
     endwhile
-    let className = join(classNameL, '$')
+
+    let className = mainClassName
+    if len(classNameL) > 0
+        let className = join(classNameL, '$')
+    endif
 
     if len(packageName) > 1
+        let mainClassName = packageName.".".mainClassName
         let className = packageName.".".className
+    endif
+
+    let pn = substitute(mainClassName, '\.', '/', "g").".java"
+    let g:mapClassFile[mainClassName] = a:fn
+    let srcRoot = substitute(a:fn, pn, "", "")
+    if index(g:sourcepaths, srcRoot) == -1
+        call add(g:sourcepaths, srcRoot)
     endif
 
     let g:mapFileClass[a:fn.':'.a:ln] = className
@@ -191,6 +199,7 @@ function! StartJDB(port)
     let t:jdb_job = job_start(jdb_cmd, {"out_cb": "JdbOutHandler", "err_cb": "JdbErrHandler", "exit_cb": "JdbExitHandler", "out_io": "buffer", "out_name": t:jdb_buf})
     let t:jdb_ch = job_getchannel(t:jdb_job)
     call <SID>PlaceBreakSigns()
+    call writefile([""], $HOME."/.jdb.vim.log")
 endfunction
 
 function! s:PlaceBreakSigns()
@@ -292,6 +301,15 @@ function! ToggleBreakPoint()
         silent exec "sign place ".bno." name=breakpt line=".ln." file=".fn
         call SendJDBCmd("stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln)
         let t:breakpoints[pos] = [bno, 1]
+    endif
+endfunction
+
+function! YankClassNameFromeFile()
+    let @v = <SID>GetClassNameFromFile(expand("%:p"), line("."))
+    let @" = @v
+    let @* = @v
+    if exists('*RYank')
+        call RYank()
     endif
 endfunction
 

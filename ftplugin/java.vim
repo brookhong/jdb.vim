@@ -76,6 +76,7 @@ nnoremap <buffer> <silent> <F6> :call QuitJDB()<CR>
 nnoremap <buffer> <silent> <F7> :call ch_sendraw(t:jdb_ch, "where\n")<CR>
 nnoremap <buffer> <silent> <F8> :call BuildMavenProject()<CR>
 nnoremap <buffer> <silent> <F10> :call ToggleBreakPoint()<CR>
+nnoremap <buffer> <silent> yc :call YankClassNameFromeFile()<CR>
 command! -buffer -nargs=0 Bp :call ToggleBreakPoint()
 command! -buffer -nargs=* J :call ch_sendraw(t:jdb_ch, <q-args>."\n")
 vnoremap E "vy:call SendJDBCmd("eval ".@v)<CR>
