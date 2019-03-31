@@ -81,7 +81,6 @@ endfunction
 function! s:NothingSuspended(str)
     if a:str == "> Nothing suspended." || a:str =~ '^\S\+ All threads resume.'
         silent exec "sign unplace ".t:cursign
-        call <SID>PlaceBreakSigns()
         return 1
     endif
     return 0
@@ -180,13 +179,6 @@ if !exists('g:jdbExecutable')
     let g:jdbExecutable = 'jdb'
 endif
 
-function! s:InitJavaTab()
-    if !exists('t:breakpoints')
-        let t:breakpoints = {}
-        let t:nextBreakPointId = 10000
-    endif
-endfunction
-
 function! StartJDB(port)
     let t:cursign = 10000 - tabpagenr()
     let t:jdb_buf = "[JDB] ".a:port.">"
@@ -198,21 +190,20 @@ function! StartJDB(port)
     execute cw."wincmd w"
     let t:jdb_job = job_start(jdb_cmd, {"out_cb": "JdbOutHandler", "err_cb": "JdbErrHandler", "exit_cb": "JdbExitHandler", "out_io": "buffer", "out_name": t:jdb_buf})
     let t:jdb_ch = job_getchannel(t:jdb_job)
-    call <SID>PlaceBreakSigns()
+    call <SID>SetBreakpoints(t:jdb_ch)
     call writefile([""], $HOME."/.jdb.vim.log")
 endfunction
 
-function! s:PlaceBreakSigns()
-    for pos in keys(t:breakpoints)
-        if t:breakpoints[pos][1]
-            let bno = t:breakpoints[pos][0]
-            let ff = matchlist(pos, '\([^:]\+\):\(\d\+\)')
-            let fn = ff[1]
-            let ln = ff[2]
-            silent exec "sign place ".bno." name=breakpt line=".ln." file=".fn
-            call ch_sendraw(t:jdb_ch, "stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln."\n")
-        endif
-    endfor
+function! s:SetBreakpoints(jdb_ch)
+    let fn = expand('%:p')
+    let bufinfo = getbufinfo('%')[0]
+    if has_key(bufinfo, 'signs')
+        let signs = bufinfo.signs
+        for s in signs
+            let ln = s.lnum
+            call ch_sendraw(a:jdb_ch, "stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln."\n")
+        endfor
+    endif
 endfunction
 
 function! OnQuitJDB()
@@ -268,17 +259,6 @@ function! StepUp()
     call ch_sendraw(t:jdb_ch, "step up\n")
 endfunction
 
-function! GetBreakPointId(pos)
-    call <SID>InitJavaTab()
-    if has_key(t:breakpoints, a:pos)
-        return t:breakpoints[a:pos]
-    else
-        let t:breakpoints[a:pos] = t:nextBreakPointId
-        let t:nextBreakPointId = t:nextBreakPointId + 1
-        return [t:breakpoints[a:pos], 0]
-    endif
-endfunction
-
 function! GetVisualSelection()
   let [lnum1, col1] = getpos("'<")[1:2]
   let [lnum2, col2] = getpos("'>")[1:2]
@@ -288,19 +268,28 @@ function! GetVisualSelection()
   return join(lines, "\n")
 endfunction
 
+let g:nextBreakPointId = 1000
 function! ToggleBreakPoint()
     let ln = line('.')
     let fn = expand('%:p')
-    let pos = fn.":".ln
-    let [bno, enabled] = GetBreakPointId(pos)
-    if enabled
+    let bno = 0
+    let bufinfo = getbufinfo('%')[0]
+    if has_key(bufinfo, 'signs')
+        let signs = bufinfo.signs
+        for s in signs
+            if s.lnum == ln
+                let bno = s.id
+                break
+            endif
+        endfor
+    endif
+    if bno == 0
+        silent exec "sign place ".g:nextBreakPointId." name=breakpt line=".ln." file=".fn
+        call SendJDBCmd("stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln)
+        let g:nextBreakPointId = g:nextBreakPointId + 1
+    else
         silent exec "sign unplace ".bno." file=".fn
         call SendJDBCmd("clear ".<SID>GetClassNameFromFile(fn, ln).":".ln)
-        let t:breakpoints[pos] = [bno, 0]
-    else
-        silent exec "sign place ".bno." name=breakpt line=".ln." file=".fn
-        call SendJDBCmd("stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln)
-        let t:breakpoints[pos] = [bno, 1]
     endif
 endfunction
 

@@ -8,9 +8,9 @@ With the plugin, you could set breakpoint in some Java file with VIM, attach to 
 
 1. Launch your java program with JDWP enabled, such as
 
-    >java -Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=6789 Sample
+    >java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=6789 Sample
 
-    >MAVEN_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,address=6789,server=y,suspend=n" mvn spring-boot:run
+    >MAVEN_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,address=6789,server=y,suspend=n" mvn spring-boot:run
 
 1. Open your java source file with VIM
 
