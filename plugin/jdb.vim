@@ -37,15 +37,11 @@ endfunction
 function! s:SetCursor(className, lineNo)
     let l:mainClassName = substitute(a:className, '\$.*', '', '')
     if has_key(g:mapClassFile, l:mainClassName)
-        let t:bpFile = g:mapClassFile[l:mainClassName]
+        let t:bpFile = substitute(g:mapClassFile[l:mainClassName], ':.*', '', '')
     else
         let t:bpFile = substitute(l:mainClassName, '\.', '/', 'g').".java"
     endif
     let t:bpLine = a:lineNo
-    " cache for nested classes
-    if stridx(a:className, '$') != -1
-        let g:mapFileClass[t:bpFile.':'.a:lineNo] = a:className
-    endif
 endfunction
 
 function! s:GetBreakPointHit(str)
@@ -101,6 +97,8 @@ function! s:UnableToSetBreakpoint(str)
             call SendJDBCmd("class ".ff[1])
             let t:breakptOuterClass = ff[1]
             let t:breakptInNestedClass = ff[2]
+        else
+            call remove(g:mapClassFile, ff[1])
         endif
         return 1
     endif
@@ -111,6 +109,7 @@ function! s:SetBreakpointInNestedClass(str)
     let ff = matchlist(a:str,  '^nested: \(\S\+\)$')
     if len(ff) && t:breakptInNestedClass != 0
         call SendJDBCmd("stop at ".ff[1].":".t:breakptInNestedClass)
+        let g:mapClassFile[ff[1]] = g:mapClassFile[substitute(ff[1], '\$.*', '', '')]
         return 1
     endif
     return 0
@@ -143,10 +142,11 @@ endfunction
 
 let g:sourcepaths = [""]
 let g:mapClassFile = {}
-let g:mapFileClass = {}
 function! s:GetClassNameFromFile(fn, ln)
-    if has_key(g:mapFileClass, a:fn.':'.a:ln)
-        return g:mapFileClass[a:fn.':'.a:ln]
+    let pos = a:fn.':'.a:ln
+    let candidates = keys(filter(g:mapClassFile, 'v:val == "'.pos.'"'))
+    if len(candidates)
+        return candidates[0]
     endif
 
     let lines = readfile(a:fn)
@@ -169,7 +169,7 @@ function! s:GetClassNameFromFile(fn, ln)
 
     let lclass = lpack
     let mainClassName = ""
-    let classPattern = '^\s*\%(public\s\+\)\?\%(final\s\+\)\?\%(abstract\s\+\)\?\(class\|interface\)\s\+\(\w\+\)'
+    let classPattern = '^\s*\%(public\s\+\)\?\%(static\s\+\)\?\%(final\s\+\)\?\%(abstract\s\+\)\?\(class\|interface\)\s\+\(\w\+\)'
     while mainClassName == "" && l:ln > lclass
         let ff = matchlist(lines[lclass], classPattern)
         if len(ff) > 2
@@ -205,13 +205,13 @@ function! s:GetClassNameFromFile(fn, ln)
     endif
 
     let pn = substitute(mainClassName, '\.', '/', "g").".java"
-    let g:mapClassFile[mainClassName] = a:fn
+    let g:mapClassFile[mainClassName] = pos
+    let g:mapClassFile[className] = pos
     let srcRoot = substitute(a:fn, pn, "", "")
     if index(g:sourcepaths, srcRoot) == -1
         call add(g:sourcepaths, srcRoot)
     endif
 
-    let g:mapFileClass[a:fn.':'.a:ln] = className
     return className
 endfunction
 
