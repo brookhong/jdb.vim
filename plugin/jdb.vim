@@ -42,6 +42,10 @@ function! s:SetCursor(className, lineNo)
         let t:bpFile = substitute(l:mainClassName, '\.', '/', 'g').".java"
     endif
     let t:bpLine = a:lineNo
+    " cache for nested classes
+    if stridx(a:className, '$') != -1
+        let g:mapFileClass[t:bpFile.':'.a:lineNo] = a:className
+    endif
 endfunction
 
 function! s:GetBreakPointHit(str)
@@ -86,6 +90,42 @@ function! s:NothingSuspended(str)
     return 0
 endfunction
 
+let t:breakptOuterClass = ""
+let t:breakptInNestedClass = 0
+function! s:UnableToSetBreakpoint(str)
+    let ff = matchlist(a:str,  '^> Unable to set breakpoint \([^:]\+\):\(\d\+\) : No code at line \2 in \1$')
+    if len(ff)
+        call SendJDBCmd("clear ".ff[1].":".ff[2])
+        " try to set breakpoints for nested classes if current class is an outer one
+        if stridx(ff[1], '$') == -1
+            call SendJDBCmd("class ".ff[1])
+            let t:breakptOuterClass = ff[1]
+            let t:breakptInNestedClass = ff[2]
+        endif
+        return 1
+    endif
+    return 0
+endfunction
+
+function! s:SetBreakpointInNestedClass(str)
+    let ff = matchlist(a:str,  '^nested: \(\S\+\)$')
+    if len(ff) && t:breakptInNestedClass != 0
+        call SendJDBCmd("stop at ".ff[1].":".t:breakptInNestedClass)
+        return 1
+    endif
+    return 0
+endfunction
+
+function! s:OnBreakPointSetInNestedClass(str)
+    let ff = matchlist(a:str, '^> Set breakpoint '.t:breakptOuterClass.'$1:'.t:breakptInNestedClass.'$')
+    if len(ff)
+        let t:breakptOuterClass = ""
+        let t:breakptInNestedClass = 0
+        return 1
+    endif
+    return 0
+endfunction
+
 function! JdbErrHandler(channel, msg)
     echo a:msg
 endfunction
@@ -96,7 +136,7 @@ endfunction
 
 function! JdbOutHandler(channel, msg)
     call writefile([a:msg], $HOME."/.jdb.vim.log", "a")
-    if !<SID>GetBreakPointHit(a:msg) && !<SID>HitBreakPoint(a:msg) && !<SID>NothingSuspended(a:msg)
+    if !<SID>GetBreakPointHit(a:msg) && !<SID>HitBreakPoint(a:msg) && !<SID>NothingSuspended(a:msg) && !<SID>UnableToSetBreakpoint(a:msg) && !<SID>SetBreakpointInNestedClass(a:msg) && !<SID>OnBreakPointSetInNestedClass(a:msg)
         echo a:msg
     endif
 endfunction
@@ -195,15 +235,17 @@ function! StartJDB(port)
 endfunction
 
 function! s:SetBreakpoints(jdb_ch)
-    let fn = expand('%:p')
-    let bufinfo = getbufinfo('%')[0]
-    if has_key(bufinfo, 'signs')
-        let signs = bufinfo.signs
-        for s in signs
-            let ln = s.lnum
-            call ch_sendraw(a:jdb_ch, "stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln."\n")
-        endfor
-    endif
+    let bufinfos = getbufinfo()
+    for bufinfo in bufinfos
+        if has_key(bufinfo, 'signs')
+            let fn = bufinfo.name
+            let signs = bufinfo.signs
+            for s in signs
+                let ln = s.lnum
+                call ch_sendraw(a:jdb_ch, "stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln."\n")
+            endfor
+        endif
+    endfor
 endfunction
 
 function! OnQuitJDB()
