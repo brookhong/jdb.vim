@@ -86,10 +86,8 @@ function! s:NothingSuspended(str)
     return 0
 endfunction
 
-let t:breakptOuterClass = ""
-let t:breakptInNestedClass = 0
 function! s:UnableToSetBreakpoint(str)
-    let ff = matchlist(a:str,  '^> Unable to set breakpoint \([^:]\+\):\(\d\+\) : No code at line \2 in \1$')
+    let ff = matchlist(a:str,  '^.* Unable to set breakpoint \([^:]\+\):\(\d\+\) : No code at line \2 in \1$')
     if len(ff)
         call SendJDBCmd("clear ".ff[1].":".ff[2])
         " try to set breakpoints for nested classes if current class is an outer one
@@ -97,7 +95,7 @@ function! s:UnableToSetBreakpoint(str)
             call SendJDBCmd("class ".ff[1])
             let t:breakptOuterClass = ff[1]
             let t:breakptInNestedClass = ff[2]
-        else
+        elseif has_key(g:mapClassFile, ff[1])
             call remove(g:mapClassFile, ff[1])
         endif
         return 1
@@ -107,7 +105,7 @@ endfunction
 
 function! s:SetBreakpointInNestedClass(str)
     let ff = matchlist(a:str,  '^nested: \(\S\+\)$')
-    if len(ff) && t:breakptInNestedClass != 0
+    if len(ff) && exists('t:breakptInNestedClass')
         call SendJDBCmd("stop at ".ff[1].":".t:breakptInNestedClass)
         let g:mapClassFile[ff[1]] = g:mapClassFile[substitute(ff[1], '\$.*', '', '')]
         return 1
@@ -116,13 +114,15 @@ function! s:SetBreakpointInNestedClass(str)
 endfunction
 
 function! s:OnBreakPointSetInNestedClass(str)
-    let ff = matchlist(a:str, '^> Set breakpoint '.t:breakptOuterClass.'$1:'.t:breakptInNestedClass.'$')
-    if len(ff)
-        let t:breakptOuterClass = ""
-        let t:breakptInNestedClass = 0
-        return 1
+    if exists('t:breakptInNestedClass')
+        let ff = matchlist(a:str, '^> Set breakpoint '.t:breakptOuterClass.'$1:'.t:breakptInNestedClass.'$')
+        if len(ff)
+            unlet t:breakptOuterClass
+            unlet t:breakptInNestedClass
+            return 1
+        endif
+        return 0
     endif
-    return 0
 endfunction
 
 function! JdbErrHandler(channel, msg)
@@ -234,17 +234,27 @@ function! StartJDB(port)
     call writefile([""], $HOME."/.jdb.vim.log")
 endfunction
 
-function! s:SetBreakpoints(jdb_ch)
+function! s:GetBreakPoints()
+    let breakpoints = []
     let bufinfos = getbufinfo()
     for bufinfo in bufinfos
         if has_key(bufinfo, 'signs')
             let fn = bufinfo.name
             let signs = bufinfo.signs
             for s in signs
-                let ln = s.lnum
-                call ch_sendraw(a:jdb_ch, "stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln."\n")
+                if s.name == "breakpt"
+                    let ln = s.lnum
+                    call add(breakpoints, [fn, ln])
+                endif
             endfor
         endif
+    endfor
+    return breakpoints
+endfunction
+
+function! s:SetBreakpoints(jdb_ch)
+    for bp in <SID>GetBreakPoints()
+        call ch_sendraw(a:jdb_ch, "stop at ".<SID>GetClassNameFromFile(bp[0], bp[1]).":".bp[1]."\n")
     endfor
 endfunction
 
@@ -352,3 +362,10 @@ if !hlexists('DbgBreakPt')
 endif
 sign define current text=->  texthl=DbgCurrent linehl=DbgCurrent
 sign define breakpt text=B>  texthl=DbgBreakPt linehl=DbgBreakPt
+
+function! s:ListBreakPoints()
+  lgetexpr map(<SID>GetBreakPoints(), 'v:val[0] . ":" . v:val[1] . "::"')
+  lfirst
+  lopen
+endfunction
+nnoremap <silent> <leader>wb :call <SID>ListBreakPoints()<CR>
