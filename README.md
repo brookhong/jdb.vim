@@ -1,6 +1,14 @@
-## A JDB plugin for VIM
+## A JDB/GDB plugin for VIM
 
-With the plugin, you could set breakpoint in some Java file with VIM, attach to some running JVM with JDWP enabled, then step through your code.
+With the plugin, you could set breakpoint in some Java file with VIM, attach to some running JVM with JDWP enabled, then step through your code. You could also attach gdb to a process, and debug your program in VIM.
+
+* Attach jdb to a JDWP port, for example
+
+        :StartJDB localhost:6780
+
+* Attach gdb to a process with pid, for example
+
+        :StartJDB 3012
 
 > The plugin depends on `channel` feature from VIM 8.0, so to use this plugin, you must have VIM over 8.0.
 

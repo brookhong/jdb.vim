@@ -7,6 +7,22 @@ function! s:ParseStackFile()
         exe "normal \<C-W>w"
         return 1
     endif
+
+    let ff = matchlist(getline("."), '^#\(\d\+\)\s\+0x\w\+\> in ')
+    if len(ff) > 0
+        call ch_sendraw(t:jdb_ch, "frame ".ff[1]."\n")
+        return 1
+    endif
+
+    if exists("t:exeDir")
+        let ff = matchlist(getline("."), '.* at \([^:]\+\):\(\d\+\)')
+        if len(ff) > 0
+            let t:bpFile = t:exeDir.ff[1]
+            let t:bpLine = ff[2]
+            call <SID>PlaceCursor()
+            return 1
+        endif
+    endif
     return 0
 endfunction
 
@@ -53,6 +69,17 @@ function! s:GetBreakPointHit(str)
     return 0
 endfunction
 
+function! s:PlaceCursor()
+    if bufname('%') =~ '^\[JDB\]'
+        exe "normal \<C-W>w"
+    endif
+    silent exec "sign unplace ".t:cursign
+    silent exec "edit ".t:bpFile
+    silent exec 'sign place '.t:cursign.' name=current line='.t:bpLine.' file='.t:bpFile
+    exec t:bpLine
+    redraw!
+endfunction
+
 function! s:HitBreakPoint(str)
     if !exists("t:bpFile")
         return 0
@@ -61,16 +88,11 @@ function! s:HitBreakPoint(str)
         if filereadable(dir.t:bpFile)
             let fl = readfile(dir.t:bpFile)
             if len(fl) > t:bpLine && (a:str == "" || stridx(a:str, fl[t:bpLine - 1]) > 0)
-                if bufname('%') =~ '^\[JDB\]'
-                    exe "normal \<C-W>w"
-                endif
                 let t:bpFile = dir.t:bpFile
-                silent exec "sign unplace ".t:cursign
-                silent exec "edit ".t:bpFile
-                silent exec 'sign place '.t:cursign.' name=current line='.t:bpLine.' file='.t:bpFile
-                exec t:bpLine
-                redraw!
-                unlet t:bpFile
+                call <SID>PlaceCursor()
+                if &ft == 'java'
+                    unlet t:bpFile
+                endif
                 return 1
             endif
         end
@@ -126,6 +148,7 @@ function! s:OnBreakPointSetInNestedClass(str)
 endfunction
 
 function! JdbErrHandler(channel, msg)
+    call writefile(['[E] '.a:msg], $HOME."/.jdb.vim.log", "a")
     echo a:msg
 endfunction
 
@@ -138,6 +161,57 @@ function! JdbOutHandler(channel, msg)
     if !<SID>GetBreakPointHit(a:msg) && !<SID>HitBreakPoint(a:msg) && !<SID>NothingSuspended(a:msg) && !<SID>UnableToSetBreakpoint(a:msg) && !<SID>SetBreakpointInNestedClass(a:msg) && !<SID>OnBreakPointSetInNestedClass(a:msg)
         echo a:msg
     endif
+endfunction
+
+let g:gdbBreakPoints = {}
+function! GdbOutHandler(channel, msg)
+    call writefile([a:msg], $HOME."/.jdb.vim.log", "a")
+
+    let ff = matchlist(a:msg, '^(gdb) Breakpoint \(\d\+\) at 0x\w\+: file .*/\([^,]\+\), line \(\d\+\).$')
+    if len(ff)
+        let g:gdbBreakPoints[ff[2].':'.ff[3]] = ff[1]
+        return
+    endif
+
+    let ff = matchlist(a:msg, "exe = '\\([^']\\+\\)'")
+    if len(ff) > 0
+        let t:exeDir = substitute(ff[1], '/[^/]\+$', '/', '')
+        call ch_sendraw(t:jdb_ch, "cd ".t:exeDir."\n")
+        call ch_sendraw(t:jdb_ch, "attach ".s:pidToAttach."\n")
+        for bp in <SID>GetBreakPoints()
+            call ch_sendraw(t:jdb_ch, "break ".substitute(bp[0], '.*/', '', '').":".bp[1]."\n")
+        endfor
+        return
+    endif
+
+    if exists("t:exeDir")
+        " let ff = matchlist(a:msg, '^\(\((gdb) \)\?#\d\+\)\@!\S.* at \([^:]\+\):\(\d\+\)')
+        let ff = matchlist(a:msg, 'Thread \d\+ ".*" hit Breakpoint \d\+, .* at \([^:]\+\):\(\d\+\)')
+        if len(ff) == 0
+            " let ff = matchlist(a:msg, '^(gdb) #\d\+\s\+0x\w\+\> in .* at \([^:]\+\):\(\d\+\)')
+            let ff = matchlist(a:msg, '^(gdb) .* at \([^:]\+\):\(\d\+\)')
+        endif
+        if len(ff) > 0
+            let t:bpFile = t:exeDir.ff[1]
+            let t:bpLine = ff[2]
+            call <SID>PlaceCursor()
+            return
+        endif
+    endif
+
+    let ff = matchlist(a:msg, '(gdb) \(\d\+\)\t.*')
+    if len(ff) > 0
+        let t:bpLine = ff[1]
+        call <SID>PlaceCursor()
+        return
+    endif
+
+    if a:msg == '(gdb) Continuing.'
+        silent exec "sign unplace ".t:cursign
+        return
+    endif
+
+    call writefile(["***UNHANDLED***"], $HOME."/.jdb.vim.log", "a")
 endfunction
 
 let g:sourcepaths = [""]
@@ -222,17 +296,37 @@ endif
 function! StartJDB(port)
     let t:cursign = 10000 - tabpagenr()
     let t:jdb_buf = "[JDB] ".a:port.">"
-    call <SID>GetClassNameFromFile(expand("%:p"), line("."))
     let cw = bufwinnr('%')
     let jdb_cmd = g:jdbExecutable.' -sourcepath '.join(g:sourcepaths, ":").' -attach '.a:port
+    let s:cmdResume = 'resume'
+    let s:cmdExit = 'exit'
+    let s:cmdStepUp = 'step up'
+    let l:outHandler = 'JdbOutHandler'
+    if &ft == 'java'
+        call <SID>GetClassNameFromFile(expand("%:p"), line("."))
+    else
+        let jdb_cmd = "gdb"
+        let s:pidToAttach = a:port
+        let s:cmdResume = 'continue'
+        let s:cmdExit = 'quit'
+        let s:cmdStepUp = 'finish'
+        let l:outHandler = 'GdbOutHandler'
+    endif
     call FocusMyConsole("botri 10", t:jdb_buf)
     call append(".", jdb_cmd)
+    normal ggddG
     execute cw."wincmd w"
-    let t:jdb_job = job_start(jdb_cmd, {"out_cb": "JdbOutHandler", "err_cb": "JdbErrHandler", "exit_cb": "JdbExitHandler", "out_io": "buffer", "out_name": t:jdb_buf})
+    let t:jdb_job = job_start(jdb_cmd, {"out_cb": l:outHandler, "err_cb": "JdbErrHandler", "exit_cb": "JdbExitHandler", "out_io": "buffer", "out_name": t:jdb_buf})
     let t:jdb_ch = job_getchannel(t:jdb_job)
-    call <SID>SetBreakpoints(t:jdb_ch)
+    if &ft == 'java'
+        call <SID>SetBreakpoints(t:jdb_ch)
+    else
+        " init t:exeDir
+        call ch_sendraw(t:jdb_ch, "info proc ".s:pidToAttach."\n")
+    endif
     call writefile([""], $HOME."/.jdb.vim.log")
 endfunction
+com! -nargs=1 StartJDB call StartJDB("<args>")
 
 function! s:GetBreakPoints()
     let breakpoints = []
@@ -269,8 +363,12 @@ endfunction
 
 function! QuitJDB()
     if exists("t:jdb_ch")
-        call ch_sendraw(t:jdb_ch, "resume\n")
-        call ch_sendraw(t:jdb_ch, "exit\n")
+        if &ft == 'java'
+            call ch_sendraw(t:jdb_ch, s:cmdResume."\n")
+            call ch_sendraw(t:jdb_ch, s:cmdExit."\n")
+        else
+            call ch_sendraw(t:jdb_ch, s:cmdExit."\n")
+        endif
         call ch_close(t:jdb_ch)
         call OnQuitJDB()
         unlet t:jdb_ch
@@ -283,7 +381,14 @@ endfunction
 
 function! SendJDBCmd(cmd)
     if IsAttached()
-        call ch_sendraw(t:jdb_ch, a:cmd."\n")
+        if &ft == 'java'
+            call ch_sendraw(t:jdb_ch, a:cmd."\n")
+        else
+            if ch_canread(t:jdb_ch) == 0
+                call job_stop(t:jdb_job, "int")
+            endif
+            call ch_sendraw(t:jdb_ch, a:cmd."\n")
+        endif
     endif
 endfunction
 
@@ -293,7 +398,7 @@ endif
 
 function! Run()
     if IsAttached()
-        call ch_sendraw(t:jdb_ch, "resume\n")
+        call ch_sendraw(t:jdb_ch, s:cmdResume."\n")
     else
         call StartJDB(g:jdbPort)
     endif
@@ -308,7 +413,7 @@ function! StepInto()
 endfunction
 
 function! StepUp()
-    call ch_sendraw(t:jdb_ch, "step up\n")
+    call ch_sendraw(t:jdb_ch, s:cmdStepUp."\n")
 endfunction
 
 function! GetVisualSelection()
@@ -335,13 +440,25 @@ function! ToggleBreakPoint()
             endif
         endfor
     endif
+    let gdbBpKey = expand("%").":".ln
     if bno == 0
         silent exec "sign place ".g:nextBreakPointId." name=breakpt line=".ln." file=".fn
-        call SendJDBCmd("stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln)
+        if &ft == 'java'
+            call SendJDBCmd("stop at ".<SID>GetClassNameFromFile(fn, ln).":".ln)
+        else
+            call SendJDBCmd("b ".gdbBpKey)
+        endif
         let g:nextBreakPointId = g:nextBreakPointId + 1
     else
         silent exec "sign unplace ".bno." file=".fn
-        call SendJDBCmd("clear ".<SID>GetClassNameFromFile(fn, ln).":".ln)
+        if &ft == 'java'
+            call SendJDBCmd("clear ".<SID>GetClassNameFromFile(fn, ln).":".ln)
+        else
+            if has_key(g:gdbBreakPoints, gdbBpKey)
+                call SendJDBCmd("delete ".g:gdbBreakPoints[gdbBpKey])
+                call remove(g:gdbBreakPoints, gdbBpKey)
+            endif
+        endif
     endif
 endfunction
 
