@@ -9,6 +9,9 @@ With the plugin, you could set breakpoint in some Java file with VIM, attach to 
 * Attach gdb to a process with pid, for example
 
         :StartJDB 3012
+* Attach lldb to a process with pid 9766, and set executable path `/works/depot_tools/chromium/src/out/Debug/` so that source code could be listed
+
+        :StartJDB /works/depot_tools/chromium/src/out/Debug/9766
 
 > The plugin depends on `channel` feature from VIM 8.0, so to use this plugin, you must have VIM over 8.0.
 

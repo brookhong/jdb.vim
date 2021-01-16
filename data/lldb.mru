@@ -1,0 +1,9 @@
+(lldb) breakpoint list
+(lldb) breakpoint set -f heap_page.cc -l 1444 --condition 'header == 0x00000045f9149a10-0x8'
+(lldb) thread list
+(lldb) thread info
+(lldb) process interrupt
+(lldb) detach
+(lldb) attach 28252
+(lldb) p Url().GetString().Characters8()
+====================output from last command====================

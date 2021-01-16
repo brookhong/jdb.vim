@@ -1,3 +1,15 @@
+let b:dbgCmdWhere = 'where'
+let b:dbgCmdResume = 'resume'
+let b:dbgCmdExit = 'exit'
+let b:dbgCmdStepUp = 'step up'
+let b:dbgCmdDelBreakpoint = 'clear '
+let b:dbgCmdEval = 'eval '
+let b:dbgCmdVar = 'eval '
+call DbgSetupKeyMap()
+
+nnoremap <buffer> <silent> <F8> :call BuildMavenProject()<CR>
+nnoremap <buffer> <silent> yc :call YankClassNameFromeFile()<CR>
+
 function! SearchFileBackwards(fn)
     let fp = expand('%:p')
     let pos = len(fp) - 1
@@ -67,16 +79,3 @@ function! RemoveUnusedJavaPackages()
     endif
 endfunction
 nnoremap <buffer> <silent> <C-C> :call RemoveUnusedJavaPackages()<CR>
-
-nnoremap <buffer> <silent> <F2> :call StepInto()<CR>
-nnoremap <buffer> <silent> <F3> :call StepOver()<CR>
-nnoremap <buffer> <silent> <F4> :call StepUp()<CR>
-nnoremap <buffer> <silent> <F5> :call Run()<CR>
-nnoremap <buffer> <silent> <F6> :call QuitJDB()<CR>
-nnoremap <buffer> <silent> <F7> :call ch_sendraw(t:jdb_ch, "where\n")<CR>
-nnoremap <buffer> <silent> <F8> :call BuildMavenProject()<CR>
-nnoremap <buffer> <silent> <F10> :call ToggleBreakPoint()<CR>
-nnoremap <buffer> <silent> yc :call YankClassNameFromeFile()<CR>
-command! -buffer -nargs=0 Bp :call ToggleBreakPoint()
-command! -buffer -nargs=* J :call ch_sendraw(t:jdb_ch, <q-args>."\n")
-vnoremap E "vy:call SendJDBCmd("eval ".@v)<CR>

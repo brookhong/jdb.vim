@@ -1,0 +1,5 @@
+(jdb) clear
+(jdb) eval policyStoreObject.getRate()
+(jdb) up\nwhere
+(jdb) down\nwhere
+====================output from last command====================
