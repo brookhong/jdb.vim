@@ -7,8 +7,10 @@ function! s:OnEnter()
             call SetJVMFrame(line('.'))
         endif
         call setloclist(0, [], 'r', { 'idx': line('.') })
-    else
+    elseif len(getloclist(0)) == line('$')
         exec ':ll '.line('.')
+    else
+        exec ':cc '.line('.')
     endif
 endfunction
 nnoremap <silent> <buffer> <CR> :call <SID>OnEnter()<cr>

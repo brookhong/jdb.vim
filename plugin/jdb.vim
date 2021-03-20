@@ -41,14 +41,22 @@ function! s:ShowHelp()
     endif
 endfunction
 
+function! s:Chansend(chan, data)
+    if has('nvim')
+        call chansend(a:chan, a:data)
+    else
+        call ch_sendraw(a:chan, a:data)
+    endif
+endfunction
+
 function! s:SendDbgCmd(cmd)
     if exists("t:dbgChannel")
         call WriteToFileDedup(substitute(a:cmd, "\n", '', ''), g:debuggerCmdHistory)
         for c in split(a:cmd, '\\n')
             if c =~ 'attach \d\+' && t:pid != 0
-                call ch_sendraw(t:dbgChannel, "process detach\n")
+                call s:Chansend(t:dbgChannel, "process detach\n")
             endif
-            call ch_sendraw(t:dbgChannel, c."\n")
+            call s:Chansend(t:dbgChannel, c."\n")
         endfor
     endif
 endfunction
@@ -175,7 +183,11 @@ function! s:ConsoleOnEnter()
 endfunction
 
 function! s:BreakDebugger()
-    call job_stop(s:jdbJob, "int")
+    if has('nvim')
+        call jobstop(s:jdbJob)
+    else
+        call job_stop(s:jdbJob, "int")
+    endif
 endfunction
 
 function! WriteToFileDedup(word, fileName)
@@ -252,7 +264,11 @@ function! s:NewConsole(bufName, lordBuf, debugger)
 endfunction
 
 function! s:IsAttached()
-    return exists("t:dbgChannel") && ch_status(t:dbgChannel) == "open"
+    if has('nvim')
+        return jobwait([t:dbgChannel], 0)[0] == -1
+    else
+        return exists("t:dbgChannel") && ch_status(t:dbgChannel) == "open"
+    endif
 endfunction
 
 function! s:GetJavaFile(className)
@@ -295,7 +311,7 @@ function! s:PlaceCursor(fileName, lineNo)
     endif
 endfunction
 
-function! DbgErrHandler(channel, msg)
+function! s:DbgErrHandler(channel, msg)
     if a:msg == 'error: Process must be launched.'
         call <SID>UpdateConsoleName(0)
     endif
@@ -305,7 +321,7 @@ function! DbgErrHandler(channel, msg)
     endif
 endfunction
 
-function! DbgExitHandler(channel, msg)
+function! s:DbgExitHandler(channel, msg)
     call <SID>OnQuitJDB()
 endfunction
 
@@ -319,7 +335,7 @@ function! SetJVMFrame(frame)
     endif
 endfunction
 
-function! JdbOutHandler(channel, msg)
+function! s:JdbOutHandler(channel, msg)
     call writefile([a:msg], $HOME."/.jdb.vim.log", "a")
     if s:CaptureHelp
         call add(s:Help, a:msg)
@@ -345,10 +361,10 @@ function! JdbOutHandler(channel, msg)
 
     let ff = matchlist(s:completeLine, '^.* Unable to set breakpoint \([^:]\+\):\(\d\+\) : No code at line \2 in \1$')
     if len(ff)
-        call ch_sendraw(t:dbgChannel, "clear ".ff[1].":".ff[2]."\n")
+        call s:Chansend(t:dbgChannel, "clear ".ff[1].":".ff[2]."\n")
         " try to set breakpoints for nested classes if current class is an outer one
         if stridx(ff[1], '$') == -1
-            call ch_sendraw(t:dbgChannel, "class ".ff[1]."\n")
+            call s:Chansend(t:dbgChannel, "class ".ff[1]."\n")
             let s:breakptOuterClass = ff[1]
             let s:breakptInNestedClass = ff[2]
         elseif has_key(g:mapClassFile, ff[1])
@@ -359,7 +375,7 @@ function! JdbOutHandler(channel, msg)
 
     let ff = matchlist(s:completeLine, '^nested: \(\S\+\)$')
     if len(ff) && exists('s:breakptInNestedClass')
-        call ch_sendraw(t:dbgChannel, "stop at ".ff[1].":".s:breakptInNestedClass."\n")
+        call s:Chansend(t:dbgChannel, "stop at ".ff[1].":".s:breakptInNestedClass."\n")
         let g:mapClassFile[ff[1]] = g:mapClassFile[substitute(ff[1], '\$.*', '', '')]
         return
     endif
@@ -400,6 +416,19 @@ function! JdbOutHandler(channel, msg)
     endif
 endfunction
 
+function! s:NeoWrap(handler, channel, msg, event)
+    if type(a:msg) == type([])
+        for msg in a:msg
+            call function(a:handler)(a:channel, msg)
+            if exists("g:jdbBuf")
+                call appendbufline(bufnr(g:jdbBuf), '$', msg)
+            endif
+        endfor
+    else
+        call function(a:handler)(a:channel, a:msg)
+    endif
+endfunction
+
 let s:stackTrace = []
 function! LatestStackTraceToLocationList(timer)
     lgetexpr s:stackTrace
@@ -415,7 +444,7 @@ function! s:MakeSourcePath(root, rp)
 endfunction
 
 let s:dbGBreakPoints = {}
-function! GdbOutHandler(channel, msg)
+function! s:GdbOutHandler(channel, msg)
     call writefile([a:msg], $HOME."/.jdb.vim.log", "a")
     if s:CaptureHelp
         call add(s:Help, a:msg)
@@ -437,10 +466,10 @@ function! GdbOutHandler(channel, msg)
     let ff = matchlist(s:completeLine, "exe = '\\([^']\\+\\)'")
     if len(ff) > 0
         let s:exeDir = substitute(ff[1], '/[^/]\+$', '/', '')
-        call ch_sendraw(t:dbgChannel, "cd ".s:exeDir."\n")
-        call ch_sendraw(t:dbgChannel, "attach ".s:pidToAttach."\n")
+        call s:Chansend(t:dbgChannel, "cd ".s:exeDir."\n")
+        call s:Chansend(t:dbgChannel, "attach ".s:pidToAttach."\n")
         for bp in <SID>GetBreakPoints()
-            call ch_sendraw(t:dbgChannel, "break ".substitute(bp[0], '.*/', '', '').":".bp[1]."\n")
+            call s:Chansend(t:dbgChannel, "break ".substitute(bp[0], '.*/', '', '').":".bp[1]."\n")
         endfor
         return
     endif
@@ -505,7 +534,7 @@ aug DBGFront
     au! User LocationPosChanged call <SID>SetFrame()
 aug END
 
-function! LldbOutHandler(channel, msg)
+function! s:LldbOutHandler(channel, msg)
     call writefile([a:msg], $HOME."/.jdb.vim.log", "a")
     if a:msg =~ '^(lldb) ' && a:msg != '(lldb) help'
         let s:CaptureHelp = 0
@@ -700,18 +729,18 @@ function! StartJDB(port)
         let t:pid = g:jdbPort
         let g:jdbBuf = "[JDB] ".g:jdbPort.">"
         let jdb_cmd = g:jdbExecutable.' -attach '.g:jdbPort
-        let l:outHandler = 'JdbOutHandler'
+        let l:outHandler = 's:JdbOutHandler'
         call <SID>GetClassNameFromFile(expand("%:p"), line("."))
     else
         let jdb_cmd = "gdb"
         let g:jdbBuf = "[GDB] ".a:port.">"
         let s:pidToAttach = a:port
-        let l:outHandler = 'GdbOutHandler'
+        let l:outHandler = 's:GdbOutHandler'
 
         if executable("lldb")
             let jdb_cmd = "lldb"
             let b:dbgCmdDelBreakpoint = 'breakpoint delete '
-            let l:outHandler = 'LldbOutHandler'
+            let l:outHandler = 's:LldbOutHandler'
             let g:jdbBuf = "[LLDB] ".a:port.">"
             if filereadable(a:port)
                 " StartJDB /works/depot_tools/chromium/src/out/Debug/Chromium.app/Contents/MacOS/Chromium
@@ -727,23 +756,30 @@ function! StartJDB(port)
         endif
     endif
     let g:jdbBuf = resolve($HOME).'/'.g:jdbBuf
-    let s:jdbJob = job_start(jdb_cmd, {"out_cb": l:outHandler, "err_cb": "DbgErrHandler", "exit_cb": "DbgExitHandler", "out_io": "buffer", "out_name": g:jdbBuf})
-    let t:dbgChannel = job_getchannel(s:jdbJob)
+    let l:errHandler = "s:DbgErrHandler"
+    let l:exitHandler = "s:DbgExitHandler"
+    if has('nvim')
+        let s:jdbJob = jobstart(jdb_cmd, {"on_stdout": function('s:NeoWrap', [l:outHandler]), "on_stderr": function('s:NeoWrap', [ l:errHandler ]), "on_exit": function('s:NeoWrap', [ l:exitHandler ])})
+        let t:dbgChannel = s:jdbJob
+    else
+        let s:jdbJob = job_start(jdb_cmd, {"out_cb": function(l:outHandler), "err_cb": function(l:errHandler), "exit_cb": function(l:exitHandler), "out_io": "buffer", "out_name": g:jdbBuf})
+        let t:dbgChannel = job_getchannel(s:jdbJob)
+    endif
     call <SID>NewConsole(g:jdbBuf, bufnr('%'), jdb_cmd)
     let s:Help = []
     let s:CaptureHelp = 1
-    call ch_sendraw(t:dbgChannel, "help\n")
+    call s:Chansend(t:dbgChannel, "help\n")
     execute win_id2win(cw)."wincmd w"
     if &ft == 'java'
         call <SID>SetBreakpoints(t:dbgChannel)
     elseif filereadable(a:port)
-        call ch_sendraw(t:dbgChannel, "target create ".a:port."\n")
+        call s:Chansend(t:dbgChannel, "target create ".a:port."\n")
     elseif s:pidToAttach != ""
         if jdb_cmd == "gdb"
             " init s:exeDir
-            call ch_sendraw(t:dbgChannel, "info proc ".s:pidToAttach."\n")
+            call s:Chansend(t:dbgChannel, "info proc ".s:pidToAttach."\n")
         else
-            call ch_sendraw(t:dbgChannel, "attach ".s:pidToAttach."\n")
+            call s:Chansend(t:dbgChannel, "attach ".s:pidToAttach."\n")
         endif
     endif
     call writefile([""], $HOME."/.jdb.vim.log")
@@ -770,7 +806,7 @@ endfunction
 
 function! s:SetBreakpoints(jdb_ch)
     for bp in <SID>GetBreakPoints()
-        call ch_sendraw(a:jdb_ch, "stop at ".<SID>GetClassNameFromFile(bp[0], bp[1]).":".bp[1]."\n")
+        call s:Chansend(a:jdb_ch, "stop at ".<SID>GetClassNameFromFile(bp[0], bp[1]).":".bp[1]."\n")
     endfor
 endfunction
 
@@ -778,18 +814,22 @@ function! QuitJDB()
     if exists("t:dbgChannel")
         let final = 1
         if &ft == 'java'
-            call ch_sendraw(t:dbgChannel, <SID>GetBufVar("dbgCmdResume")."\n")
-            call ch_sendraw(t:dbgChannel, <SID>GetBufVar("dbgCmdExit")."\n")
+            call s:Chansend(t:dbgChannel, <SID>GetBufVar("dbgCmdResume")."\n")
+            call s:Chansend(t:dbgChannel, <SID>GetBufVar("dbgCmdExit")."\n")
         else
             if t:pid == 0
-                call ch_sendraw(t:dbgChannel, <SID>GetBufVar("dbgCmdExit")."\n")
+                call s:Chansend(t:dbgChannel, <SID>GetBufVar("dbgCmdExit")."\n")
             else
                 let final = 0
-                call ch_sendraw(t:dbgChannel, "process detach\n")
+                call s:Chansend(t:dbgChannel, "process detach\n")
             endif
         endif
         if final == 1
-            call ch_close(t:dbgChannel)
+            if has('nvim')
+                call jobstop(t:dbgChannel)
+            else
+                call ch_close(t:dbgChannel)
+            endif
             call <SID>OnQuitJDB()
             unlet t:dbgChannel
         endif
