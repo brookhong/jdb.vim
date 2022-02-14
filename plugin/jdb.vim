@@ -922,18 +922,32 @@ function! s:GetBufVar(var)
 endfunction
 
 function! DbgSetupKeyMap()
-    nnoremap <buffer> <silent> <F1> :call <SID>ShowHelp()<CR>
-    nnoremap <buffer> <silent> <F2> :call StepInto()<CR>
-    nnoremap <buffer> <silent> <F3> :call StepOver()<CR>
-    nnoremap <buffer> <silent> <F4> :call StepUp()<CR>
-    nnoremap <buffer> <silent> <F5> :call <SID>Run()<CR>
-    nnoremap <buffer> <silent> <F6> :call QuitJDB()<CR>
-    nnoremap <buffer> <silent> <F7> :call <SID>SendDbgCmdInConsole(<SID>GetBufVar("dbgCmdWhere")."\n")<CR>
-    nnoremap <buffer> <silent> <F10> :call ToggleBreakPoint('')<CR>
-    command! -buffer -nargs=1 Bp :call ToggleBreakPoint(<f-args>)
-    command! -buffer -nargs=1 Bpa :call <SID>SendDbgCmd("breakpoint set -a ".<f-args>."\n")
-    vnoremap <buffer> E "vy:call <SID>SendDbgCmd(<SID>GetBufVar("dbgCmdEval").@v)<CR>
-    vnoremap <buffer> P "vy:call <SID>SendDbgCmd(<SID>GetBufVar("dbgCmdVar").@v)<CR>
+  command! -buffer -nargs=1 Bp :call ToggleBreakPoint(<f-args>)
+  command! -buffer -nargs=1 Bpa :call <SID>SendDbgCmd("breakpoint set -a ".<f-args>."\n")
+
+  nnoremap <buffer> <silent> <Plug>JdbShowHelp :call <SID>ShowHelp()<CR>
+  nnoremap <buffer> <silent> <Plug>JdbStepInto :call StepInto()<CR>
+  nnoremap <buffer> <silent> <Plug>JdbStepOver :call StepOver()<CR>
+  nnoremap <buffer> <silent> <Plug>JdbStepUp :call StepUp()<CR>
+  nnoremap <buffer> <silent> <Plug>JdbRun :call <SID>Run()<CR>
+  nnoremap <buffer> <silent> <Plug>JdbQuit :call QuitJDB()<CR>
+  nnoremap <buffer> <silent> <Plug>JdbDebugCmdWhere :call <SID>SendDbgCmdInConsole(<SID>GetBufVar("dbgCmdWhere")."\n")<CR>
+  nnoremap <buffer> <silent> <Plug>JdbToggleBreakpoint :call ToggleBreakPoint('')<CR>
+  vnoremap <buffer> <Plug>JdbDebugCmdEval "vy:call <SID>SendDbgCmd(<SID>GetBufVar("dbgCmdEval").@v)<CR>
+  vnoremap <buffer> <Plug>JdbDebugCmdVar "vy:call <SID>SendDbgCmd(<SID>GetBufVar("dbgCmdVar").@v)<CR>
+
+  if !exists("g:jdb_no_mappings") || ! g:jdb_no_mappings
+    nmap <buffer> <silent> <F1> <Plug>JdbShowHelp
+    nmap <buffer> <silent> <F2> <Plug>JdbStepInto
+    nmap <buffer> <silent> <F3> <Plug>JdbStepOver
+    nmap <buffer> <silent> <F4> <Plug>JdbStepUp
+    nmap <buffer> <silent> <F5> <Plug>JdbRun
+    nmap <buffer> <silent> <F6> <Plug>JdbQuit
+    nmap <buffer> <silent> <F7> <Plug>JdbDebugCmdWhere
+    nmap <buffer> <silent> <F10> <Plug>JdbToggleBreakpoint
+    vmap <buffer> E <Plug>JdbDebugCmdEval
+    vmap <buffer> P <Plug>JdbDebugCmdVar
+  end
 endfunction
 
 if !hlexists('DbgCurrent')
@@ -942,6 +956,7 @@ endif
 if !hlexists('DbgBreakPt')
   hi DbgBreakPt term=reverse ctermfg=White ctermbg=Green gui=reverse
 endif
+
 sign define current text=->  texthl=DbgCurrent linehl=DbgCurrent
 sign define breakpt text=B>  texthl=DbgBreakPt linehl=DbgBreakPt
 
